@@ -1,0 +1,45 @@
+---
+title: 2D sound localisation with 2 microphones
+author: Kevin Stadler
+date: November 22, 2014
+output: pdf_document
+---
+
+Assume we have two omnidirectional microphones that receive what we assume to be the same sound event a time delay of `t` apart. Where is the origin of the sound?
+
+When the microphones are a certain distance apart from each other, the maximum time it can take a sound to travel between the microphones is that distance divided by the speed of sound `c`. To normalise the calculations we will simply divide the actual time difference `t` by the microphone distance divided by `c`, and call it `d`. Using this measure `d` allows us to normalise the distance between the microphones so that without loss of generality, we can take the microphones to be located at $m_0=(0,0)$ and $m_1=(1,0)$: `y=0` is the line on which the microphones are located, so that the `y` coordinate expresses the distance from this line, while `x` captures the relative position between the two microphones.
+
+Possible origins of the sound are all points `(x,y)` which satisfy
+
+$$|| (x,y) - m_0 || - || (x,y) - m_1 || = \frac{tc}{d}$$
+
+$$\sqrt{x^2+y^2} - \sqrt{(x-1)^2+y^2} = \frac{tc}{d}$$
+
+$$y^2=\frac{x^2+x+\frac{1}{4}}{d^2} + \frac{d^2}{4} - x - \frac{1}{2} - x^2$$
+
+<!-- solve(y^2=(x^2+x+1/4)/d^2 + d^2/4 - x - 1/2 - x^2,x); -->
+
+solving for `x` we find
+
+$$x=\frac{d\sqrt{(4-4d^2)y^2+d^4-2d^2+1}+d^2-1}{2d^2-2}$$
+
+For every time difference `d` (expressed as a fraction of the time it takes for sound to travel between the two microphones) there is a cohort of possible points of origin of the sounds, as seen in the figure below.
+
+```{r echo=FALSE, results="hide", fig.width=5, fig.height=8, fig.cap="Cohorts of points that could be the origin of a sound which is received with a specific time difference."}
+solution <- function(x, d)
+  (d*sqrt((4-4*d^2)*x^2 + d^4 - 2*d^2 + 1) + d^2 - 1)/(2*d^2-2)
+
+roomdepth <- 2
+ndiffs <- 9
+
+cols <- rainbow(ndiffs+1)
+ds <- 0:ndiffs/(ndiffs+1)
+
+ys <- roomdepth*0:100/100
+data <- lapply(ds, function(d)sapply(ys, solution, d=d))
+
+plot(0:1, c(0,0), pch=19, col="red", xlim=0:1, ylim=c(0,roomdepth), yaxs="i", xlab="x", ylab="y")
+mapply(function(xs,col){lines(xs, ys, col=col);lines(1-xs, ys, col=col)}, data, cols)
+legend("topright", legend=ds, fill=cols, title="d")
+```
+
