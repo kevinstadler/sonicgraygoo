@@ -1,5 +1,6 @@
 (ns sonicgraygoo.core
-  (:use [clojure.java.io :only [reader]]
+  (:gen-class)
+  (:use [clojure.java.io :only [as-file reader]]
         [quil.core]
         [quil.applet :only [current-applet]])
   (:import (org.jbox2d.p5 Physics)
@@ -15,87 +16,99 @@
 (def incubating (atom nil))
 (def munchies (atom nil))
 (def bodiestowrap (atom nil))
+(def eatingstohappen (atom nil))
 
 ; the last detected noise event, [x-coordinate loudness] tuples
 (def noise-event (atom nil))
 
-(def defaults {:c 343.2 :d 4.00 :l 2.00 :hunger 3 :throb 30})
-(def config (into defaults (read (java.io.PushbackReader. (reader "config.cfg")))))
+(def defaults {:c 343.2 :d 4.00 :l 2.00 :dance 40 :hunger 3 :hz 60 :spawn 0.001 :throb 60 :incubation 0})
+
+(defn load-config []
+  (if (.exists (as-file "config.cfg"))
+    (def config (into defaults (read (java.io.PushbackReader. (reader "config.cfg"))))))
+  (def throb (float-array (map #(inc (/ (Math/sin (/ (* % PI 2) (config :throb))) 2)) (range (config :throb))))))
+;  (def throb (float-array (map #(Math/sin (/ (* % PI) (config :throb))) (range (config :throb))))))
+;    (def hungerdiff (/ 1 (* (config :hunger) 50))))
+
+(defn throbbing
+  ([] (throbbing @framesrendered))
+  ([i] (nth throb (mod i (config :throb)))))
+
+(defn dance []
+  (let [[x y] (repeatedly 2 #(- (rand (* 2 (config :dance))) (config :dance)))]
+    (Vec2. x y)))
 
 (defn new-goo
-  "Creates some new goo, adds it to the world and returns it"
+  "Creates some new goo and adds it to the world"
   ([v2 f] (new-goo (.x v2) (.y v2) f))
   ([x y f]
+   (println (System/currentTimeMillis))
    (let [goo (.createCircle world x y 6)]
       (.applyForce world goo (Vec2. (rand 200) (rand 200)))
-      (swap! population assoc goo {:body goo :freq f :hunger (:hunger config) :incubation nil}))))
+      (swap! population assoc goo {:body goo :freq f :hunger (:hunger config) :breath @framesrendered}))))
+
+(defn clone [goo]
+  (new-goo (.getPosition world (:body goo)) (inc (:freq goo))))
 
 (defn new-munch
   "Creates a new crunchy munch and adds it to the world"
   [x volume]
   {:pre (pos? volume)}
-  (let [blob (.createCircle world x (- (height) 20) 2);(FBlob.)
+  (let [blob (.createCircle world x (- (height) 20) 2)
         munch {:body blob :volume volume}]
-    (swap! munchies conj munch)
-    (.applyForce world blob (Vec2. (rand 300) -100))))
+    (swap! munchies assoc blob munch)
+    (.applyForce world blob (Vec2. (- (rand 200) 100) 30))))
 
 (defn feed
-  "Feed the goo. Returns the number of bites the goo ate, or 0 if it wasn't hungry."
-  [goo]
-  (if (nil? (:incubation goo))
-    (do ; feed
-      (if (= 1 (:hunger goo))
-        ; the goo is full!
-        (do
-          (println "stopping the goo! (replicating goo must stand still)")
-          (.setLinearVelocity (:body goo) (Vec2. 0.0 0.0))
-          (new-goo (.x (.getPosition world (:body goo))) (.y (.getPosition world (:body goo))) (:freq goo))
-          ; start animation
-          (swap! population assoc-in [(:body goo) :incubation] (millis))
-          ; make goo hungry again, just in case
-          (swap! population assoc-in [(:body goo) :hunger] (:hunger config)))
-        ; just munch a little
-        (swap! population update-in [(:body goo) :hunger] dec))
-      1)
-    0))
-
-(defn eat-some
-  "Have the munch get eaten"
-  [munch bites]
-  (let [body (:body munch)
-        new-volume (- (:volume munch) bites)]
-    (println munch "is being munched" bites "times. Mmmmmh.")
-    (if (pos? new-volume)
-      (let [new-shape (CircleDef.)]
-        (println "Munch is smaller now.")
-        (.destroyShape body (.getShapeList body))
-        (set! (. new-shape radius) new-volume)
-        (.createShape body new-shape))
+  "Feed the goo some munch, depending on how hungry it is."
+  [goo munch]
+  (let [bites (min (:hunger goo) (:volume munch))]
+    ; feed the goo
+    (if (== bites (:hunger goo))
+      ; the goo is full!
       (do
-        (println "Munch been all munched up, oops!")
-        (swap! munchies #(remove (partial = munch) %))
-        (.removeBody world body)))))
+;        (.setLinearVelocity (:body goo) (Vec2. 0.0 0.0))
+        ; start animation
+        (swap! population dissoc (:body goo))
+        ; make goo hungry again
+        (swap! incubating assoc (assoc goo :hunger (config :hunger))
+                                (mod (dec @framesrendered) (config :incubation))))
+      ; no big hunger, just munch a little
+      (swap! population update-in [(:body goo) :hunger] dec))
+    ; have the munch get eaten
+    (let [body (:body munch)
+          new-volume (- (:volume munch) bites)]
+      (if (pos? new-volume)
+        (let [new-shape (CircleDef.)]
+          (println "Munch is smaller now.")
+          (.destroyShape body (.getShapeList body))
+          (set! (. new-shape radius) new-volume)
+          (.createShape body new-shape))
+        (do
+          (swap! munchies dissoc body)
+          (.removeBody world body))))))
 
 (defn do-eating
   "Let all the goos do the munchy eating they deserve"
   []
-  (doseq [munch @munchies]
-    ; what are we rubbing up against, and is it a goo?
-    (let [eaters (keep identity (map #(get @population %) (.getBodiesInContact (:body munch))))
-          ; give some food to the goo - but did it actually eat it?
-          ; just how much of this munch to eat?
-          bites (reduce + (map feed eaters))]
-            (when (pos? bites) (eat-some munch bites)))))
+  (doseq [[goo munch] @eatingstohappen]
+    (feed goo munch))
+  (swap! eatingstohappen (constantly [])))
 
 (defn reset []
   ; remove bodies
-  (doseq [body (concat (keys @population) (map :body @munchies))]
+  (doseq [body (concat (keys @population) (map :body (vals @munchies)))]
     (.removeBody world body))
   (swap! population (constantly {}))
   (swap! incubating (constantly {}))
-  (swap! munchies (constantly []))
+  (swap! munchies (constantly {}))
   (swap! framesrendered (fn [x] 0))
-  (new-goo 150.0 50.0 100.0))
+  (load-config)
+  ; set matching graphics+physics update rates
+  (frame-rate (:hz config))
+  (set! (. (.getSettings world) hz) (:hz config))
+  ; be the center of my world
+  (new-goo (/ (width) 2) (/ (height) 2) 100.0))
 
 (definterface Renderer
   (^void draw [^org.jbox2d.dynamics.World w]))
@@ -107,25 +120,28 @@
       (.stroke g 200)
       (doseq [goo (vals @population)]
         (let [pos (.getPosition world (:body goo))]
-          (.fill g 0.0 (* 80 (:hunger goo)) 0.0)
+          ; hungerdiff should be 40+ to be visible
+          (.fill g (- 180 (* (:hunger goo) 50)) 30 20)
+          (.ellipse g (.x pos) (.y pos) 12 12)))
+      (doseq [[goo start] @incubating]
+        (let [pos (.getPosition world (:body goo))]
+          (.fill g 100 100 20)
+          (.fill g (* 100 (throbbing (+ @framesrendered start))) 100 20)
           (.ellipse g (.x pos) (.y pos) 12 12)))
       (.stroke g 255)
       (.fill g 255.0 255.0 255.0)
-      (doseq [goo @munchies]
-        (let [pos (.getPosition world (:body goo))]
+      (doseq [mn (vals @munchies)]
+        (let [pos (.getPosition world (:body mn))]
           (.ellipse g (.x pos) (.y pos) 4 4))))))
 
 (defn setup []
   (def g (current-graphics))
   (smooth)
-  (frame-rate 30)
   ; 1. hard boundary at edges
   ; 2. world width/height (largest, blue line, things outside don't collide and might be destroyed)
   ; 3. border box width/height
   (def world (Physics. (current-applet) (width) (height) 0.0 0.0 (- (width) 20) (- (height) 20) (- (width) 20) (- (height) 20) 10.0))
   (.setCustomRenderingMethod world renderer "draw")
-  ; decrease physics update rate
-  (set! (. (.getSettings world) hz) 30.0)
   ; turn border into sensor
   (doseq [border (.getBorder world)]
     (loop [edge (.getShapeList border)]
@@ -144,9 +160,12 @@
           ; can't modify world within callback, queue bodies for wrapping
           (swap! bodiestowrap conj (.getBody (.shape2 p)))
           ; did a goo bite a munchy munch?
-          (when (apply not= (map #(contains? @population (.getBody %)) [(.shape1 p) (.shape2 p)]))
-            ; munching!
-            (println (class (.shape1 p)) (.shape2 p)))))
+          (let [goos (map #(@population (.getBody %)) [(.shape1 p) (.shape2 p)])]
+            (when (apply not= (map nil? goos))
+              ; make sure munch wasn't already eaten away by a quicker and hungrier goo
+              (if-let [munch (@munchies (.getBody (if (nil? (first goos)) (.shape1 p) (.shape2 p))))]
+                ; munching!
+                (swap! eatingstohappen conj [(first (keep identity goos)) munch]))))))
       (persist [p]
         ; is there a persistent munching?
         )
@@ -165,23 +184,31 @@
   (when (seq @bodiestowrap)
     (doseq [body @bodiestowrap]
       (.setXForm body (Vec2. (wrap (.x (.getPosition body))) (wrap (.y (.getPosition body)))) 0.0))
-    (swap! bodiestowrap (fn [old] nil)))
+    (swap! bodiestowrap (fn [_] nil)))
+  ; has the contactlistener found us some eating?
   (do-eating)
+  ; make dancing happen
+  (when (< (rand) (* (count @population) 0.01))
+    (.applyForce world (:body (rand-nth (vals @population))) (dance)))
   ; add stochastic baseline munchies!
-  (when (< (rand) 0.03)
+  (when (< (rand) (config :spawn))
     (new-munch (rand-int (.width (current-applet))) 1))
-  (doseq [weirdo @incubating]))
+  (doseq [[weirdo start] @incubating]
+    (when (= start (mod @framesrendered (config :incubation)))
+      (swap! incubating dissoc weirdo)
+      (swap! population assoc (:body weirdo) weirdo)
+      (clone weirdo))))
 
 (defn clone-all []
-  (println "Cloning up to 128 goos")
-  (doseq [goo (take 128 (vals @population))]
-    (new-goo (.getPosition world (:body goo)) (:freq goo))))
+  (dorun (map clone (vals @population))))
 
 (defn keypress []
   (case (raw-key)
     (\C \c) (println (count @population))
     (\D \d) (clone-all)
+    (\F \f) (println (current-frame-rate))
     (\R \r) (reset)
+    (\S \s) (new-munch (rand (width)) 1)
     \+ (frame-rate (inc (current-frame-rate)))
     \- (frame-rate (dec (current-frame-rate)))
     (println (raw-key))))
