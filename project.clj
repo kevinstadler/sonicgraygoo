@@ -1,10 +1,11 @@
 (defproject sonicgraygoo "0.0.1-SNAPSHOT"
   :description "FIXME: write description"
   :url "http://github.org/kevinstadler/sonicgraygoo"
-  :main sonicgraygoo.core
+  :main ^:skip-aot sonicgraygoo.core
+  :jvm-opts ^:replace []
   :dependencies [[org.clojure/clojure "1.6.0"]
                  [quil "2.2.4"]
-                 [overtone "0.9.1"]
+                 [overtone "0.10-SNAPSHOT"]
                  ; we need 2.0.1, e.g. because of boxwrap2d's call to step()
                  [org.jbox2d/jbox2d-library "2.0.1"]
                  [org.jbox2d/boxwrap2d "0.0.1"]])
