@@ -4,7 +4,7 @@
   :main ^:skip-aot sonicgraygoo.core
   :jvm-opts ^:replace []
   :dependencies [[org.clojure/clojure "1.6.0"]
-                 [quil "2.2.4"]
+                 [quil "2.2.4" :exclusions [processing/processing-js]]
                  [overtone "0.10-SNAPSHOT"]
                  ; we need 2.0.1, e.g. because of boxwrap2d's call to step()
                  [org.jbox2d/jbox2d-library "2.0.1"]

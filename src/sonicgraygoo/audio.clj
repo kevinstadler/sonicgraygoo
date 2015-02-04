@@ -23,7 +23,7 @@
     (send-trig onsets bus (loudness f))))
 
 (defn stop-detection []
-  (remove-event-handler :inputhandler))
+  (println (remove-event-handler :inputhandler)))
 
 (defn start-detection [stereo]
 ;  (kill noisedetector)
@@ -49,4 +49,5 @@
     (Thread/sleep 124000)))
 
 (defn shutdown []
+  (stop-goo false)
   (println (kill-server)))
