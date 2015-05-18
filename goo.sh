@@ -3,4 +3,8 @@ pidof scsynth > /dev/null
 if [ $? -ne 0 ]; then
   ./scsynth.sh &
 fi
-java -jar goo.jar
+if [ -f goo.jar ]; then
+  java -jar goo.jar
+else
+  lein run
+fi

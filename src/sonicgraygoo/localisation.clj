@@ -4,7 +4,7 @@
 (def input-event (atom nil))
 
 (defn monohandler [event]
-  (println "m" (rest (:args event)))
+  (println "m" (:args event))
   (reset! input-event (rest (:args event))))
 
 

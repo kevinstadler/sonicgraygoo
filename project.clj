@@ -6,6 +6,8 @@
   :dependencies [[org.clojure/clojure "1.6.0"]
                  [quil "2.2.4" :exclusions [processing/processing-js]]
                  [overtone "0.10-SNAPSHOT"]
+                 [clj-native "0.9.5"]
+                 ;[com.pi4j/pi4j-core "0.0.5"]
                  ; we need 2.0.1, e.g. because of boxwrap2d's call to step()
                  [org.jbox2d/jbox2d-library "2.0.1"]
                  [org.jbox2d/boxwrap2d "0.0.1"]])

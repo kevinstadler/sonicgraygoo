@@ -9,8 +9,8 @@
 (clear)
 
 ; it might get loud
-(fx-compressor 1 0.2 1 0.3)
-(fx-compressor 0 0.2 1 0.3)
+(fx-compressor 0 0.2 0.6 0.2) ; was: 1 0.2 1.0 0.3
+(fx-compressor 1 0.2 0.6 0.2)
 
 (definst goo [freq 100]
   (sin-osc freq))
@@ -25,15 +25,14 @@
 (defn stop-detection []
   (println (remove-event-handler :inputhandler)))
 
-(defn start-detection [stereo]
+(defn start-detection [inputs localisation]
 ;  (kill noisedetector)
   (stop-detection)
-  (noisedetector 1)
-  (if stereo
-    (noisedetector 0))
+  (dotimes [i inputs]
+    (noisedetector i))
   ; register event handler
   (sync-event "/tr")
-  (on-event "/tr" (if stereo stereohandler monohandler) :inputhandler))
+  (println (on-event "/tr" (if (= :time localisation) stereohandler monohandler) :inputhandler)))
 
 (defn add-goo [f]
   (goo f))
@@ -42,7 +41,7 @@
   (kill goo)
   (recording-stop)
   (when outro
-    (stop-detection)
+;    (stop-detection)
     ; everybody loves theatrical pauses
     (Thread/sleep 2000)
     ((sample "100people.wav"))

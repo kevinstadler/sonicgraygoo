@@ -2,7 +2,7 @@
   (:gen-class)
   (:use [sonicgraygoo.audio :only [add-goo stop-goo start-detection shutdown]]
         [sonicgraygoo.localisation :only [input-event set-maxdiff]]
-        [clojure.java.io :only [as-file]]
+        [clojure.java.io :only [as-file resource]]
         [quil.core]
         [quil.applet :only [current-applet]]
         [overtone.core :only [recording-start recording-stop]])
@@ -23,20 +23,21 @@
 (def incubating (atom nil))
 (def munchies (atom nil))
 (def munchtoadd (atom nil))
-
-(def aconfig (atom {:c 343.2 :d 4.00 :l 2.00 :dance 40 :hunger 3 :hz 60 :spawn 0.001 :throb 60 :incubation 0 :gsize 10 :msize 2 :goolimit 256 :munchlimit 200 :mutation :vanilla :localisation true :display (dec (count (.getScreenDevices (GraphicsEnvironment/getLocalGraphicsEnvironment)))) :size [800 600] :buffer 0 :record false :outro true}))
-(defn config [key]
-  (@aconfig key))
+(def threshold (atom 0.0))
 
 (defn read-file [file]
   (read-string (slurp file)))
 
 (def mutate)
 (defn select-mutation [key]
-  (def mutate (key (read-file (clojure.java.io/resource "mutation.cfg")))))
+  (def mutate (key (read-file (resource "mutation.cfg")))))
 
-(defn load-config [file]
-  (swap! aconfig #(into % (read-file file)))
+(def aconfig (atom (read-file (resource "defaults.cfg"))))
+(defn config [key]
+  (@aconfig key))
+
+(defn load-config []
+  (swap! aconfig #(into % (read-file "config.cfg")))
   (select-mutation (config :mutation))
   (def throb (float-array (map #(inc (/ (Math/sin (/ (* % PI 2) (config :throb))) 2)) (range (config :throb)))))
   (set-maxdiff (config :c) (config :d)))
@@ -46,8 +47,9 @@
   ([i] (nth throb (mod i (config :throb)))))
 
 (defn dance []
-  (let [[x y] (repeatedly 2 #(- (rand (* 2 (config :dance))) (config :dance)))]
-    (Vec2. x y)))
+;  (let [[x y] (repeatedly 2 #(- (rand (* 2 (config :dance))) (config :dance)))]
+  (let [angle (rand (* 2 PI))]
+    (Vec2. (* (Math/sin angle) (config :dance)) (* (Math/cos angle) (config :dance)))))
 
 (defn get-contacts [body]
   (loop [collected (list (.getContactList body))]
@@ -58,13 +60,16 @@
 (def new-goo)
 (defn reset [outro]
   (set! (. (.getSettings world) hz) 0)
+  (frame-rate 0)
   (stop-goo outro) ; sleeps
   (doseq [body (concat (keys @population) (map :body (keys @incubating)) (map :body (vals @munchies)))]
     (.removeBody world body))
   (reset! framesrendered 0)
+  (reset! threshold 0)
   (reset! population {})
   (reset! incubating {})
   (reset! munchies {})
+  (reset! munchtoadd nil)
 
   ; set matching graphics+physics update rates
   (frame-rate (config :hz))
@@ -73,8 +78,8 @@
     (println (recording-start (str (System/currentTimeMillis) ".wav"))))
   ; theatrical pause
   (Thread/sleep 2000)
-  (if outro
-    (start-detection (config :localisation)))
+;  (if outro
+;    (start-detection (config :localisation)))
   (spit logfile "reset" :append true)
   ; be the center of my world
   (new-goo (/ (width) 2) (/ (height) 2) 100.0))
@@ -84,10 +89,12 @@
   ([v2 f] (new-goo (.x v2) (.y v2) f))
   ([x y f]
     (if (== (config :goolimit) (count @population))
-      (reset (config :outro))
+      (do
+        (reset (config :outro))
+        false) ; signal non-creation
       (do
         (spit logfile (System/currentTimeMillis) :append true)
-        (let [goo (.createCircle world x y 6)]
+        (let [goo (.createCircle world x y (config :goosize))]
           ;(.applyForce world goo (Vec2. (rand 200) (rand 200)))
           (swap! population assoc goo {:body goo :freq f :hunger (config :hunger) :breath @framesrendered :synth (add-goo f)}))))))
 
@@ -99,13 +106,18 @@
 (defn new-munch
   "Creates a new crunchy munch and adds it to the world"
   ([x] (new-munch x 1))
-  ([x volume]
+  ([x volume] (new-munch x 0 volume))
+  ([x y volume]
    {:pre (pos? volume)}
    (let [new-munchs (repeatedly (round volume)
-                      #(do {:body (.createCircle world x (inc (height)) 2) :volume 1}))]
+                      #(do {:body (.createCircle world x (* (- 1 y) (inc (height))) (config :munchsize)) :volume 1}))]
      (swap! munchies (partial apply assoc) (interleave (map #(:body %) new-munchs) new-munchs))
-     (doseq [m new-munchs] (.applyForce world (:body m) (Vec2. (- (rand 120) 60) (rand 60)))))))
+     (doseq [m new-munchs] (.applyForce world (:body m) (Vec2. (- (rand (* 2 (config :injectionforce))) (config :injectionforce)) (rand (config :injectionforce))))))))
 ;     (doseq [m new-munchs] (.applyForce world (:body m) (Vec2. (/ (* (+ 60 (rand 40)) (- (/ (width) 2) x)) (height)) (+ 60 (rand 40))))))))
+
+(defn remove-munch [munchbody]
+  (swap! munchies dissoc munchbody)
+  (.removeBody world munchbody))
 
 (defn feed
   "Feed the goo some munch, depending on how hungry it is."
@@ -133,9 +145,7 @@
               (.destroyShape munchbody (.getShapeList munchbody))
               (set! (. new-shape radius) new-volume)
               (.createShape munchbody new-shape)) ; Cannot cast org.jbox2d.collision.shapes.CircleDef to org.jbox2d.collision.ShapeDef>
-            (do
-              (swap! munchies dissoc munchbody)
-              (.removeBody world munchbody))))))))
+            (remove-munch munchbody)))))))
 
 (defn do-eating
   "Let all the goos do the munchy eating they deserve"
@@ -149,28 +159,37 @@
 (defn draw-world [g]
   (.background g 0)
   (.stroke g 200)
-  (doseq [goo (vals @population)]
-    (let [pos (.getPosition world (:body goo))
-          grayness (- 150 (* (:hunger goo) 50))]
-      ; hungerdiff should be 40+ to be visible
-      (.fill g grayness grayness grayness)
-      (.ellipse g (.x pos) (.y pos) 12 12)))
-  (doseq [[goo start] @incubating]
-    (let [pos (.getPosition world (:body goo))]
-      (.fill g 100 100 20)
-      (.fill g (* 100 (throbbing (+ @framesrendered start))) 100 20)
-      (.ellipse g (.x pos) (.y pos) 12 12)))
+  (let [goosize (* 2 (config :goosize))]
+    (doseq [goo (vals @population)]
+      (let [pos (.getPosition world (:body goo))
+            grayness (- 150 (* (:hunger goo) 50))]
+        ; hungerdiff should be 40+ to be visible
+        (.fill g grayness grayness grayness)
+        (.ellipse g (.x pos) (.y pos) goosize goosize)))
+    (doseq [[goo start] @incubating]
+      (let [pos (.getPosition world (:body goo))]
+        (.fill g 100 100 20)
+        (.fill g (* 100 (throbbing (+ @framesrendered start))) 100 20)
+        (.ellipse g (.x pos) (.y pos) goosize goosize))))
   (.stroke g 255)
   (.fill g 255.0 255.0 255.0)
   (doseq [mn (vals @munchies)]
     (let [pos (.getPosition world (:body mn))]
-      (.ellipse g (.x pos) (.y pos) 4 4))))
+      (.ellipse g (.x pos) (.y pos) (* 2 (config :munchsize)) (* 2 (config :munchsize))))))
 
 (def graphics nil)
 
 (definterface Renderer
   (^void draw [^org.jbox2d.dynamics.World w]))
 (def renderer (proxy [Renderer] [] (draw [w] (draw-world graphics))))
+
+; receive and return a (x volume) tuple
+(def localisations {
+  :mono #(list (rand) %2)
+  :stereo #(list (+ 0.3 (* 0.4 %1)) %2)
+  :time nil
+  :intensity nil
+  })
 
 (defn setup []
   (def graphics (current-graphics))
@@ -191,29 +210,31 @@
   ; make bodies mobile
   (.setDensity world 1.0)
   ; make things go nice and fast (default 0.4)
-  (.setFriction world 0.1)
-  (start-detection (config :localisation))
-  (reset false))
+  (.setFriction world (config :friction))
+  (reset false)
+  (start-detection 2 (config :localisation))
+  (add-watch input-event :watch
+    #(let [[x vol] %4]
+      (when (> vol (max @threshold (config :threshold)))
+        (swap! munchtoadd conj (apply ((config :localisation) localisations) %4)))
+      (swap! threshold (fn [avg n] (let [x (+ (* 0.9 avg) (* 0.1 n))] (println x) x)) (second %4)))))
 
 (defn wrap [pos]
   (- (Math/signum pos) pos))
 
+(def sweeppos (atom nil))
 (defn draw []
   "None of the drawing actually happens here, just updating the world model"
-  (when (zero? @framesrendered)
-    (add-watch input-event :watch
-      (fn [_ _ _ [x vol]]
-        ; TODO map x
-        (swap! munchtoadd conj [(rand 1024) vol]))))
   (swap! framesrendered inc)
   (do-eating)
   ; do wrapping
   (when-let [contacts (seq (mapcat get-contacts (.getBorder world)))]
     (doseq [body contacts]
-      ; TODO (config :munchlimit)
-      (.setXForm body (Vec2. (wrap (.x (.getPosition body))) (wrap (.y (.getPosition body)))) 0.0)))
+      (if-let [munch (@munchies body)]
+        (remove-munch body) ; maybe only if floating off the top of the screen or munchlimit reached?
+        (.setXForm body (Vec2. (wrap (.x (.getPosition body))) (wrap (.y (.getPosition body)))) 0.0))))
   ; make dancing happen
-  (when (< (rand) (* (count @population) 0.01))
+  (when (< (rand) (* (count @population) (config :restlessness)))
     (.applyForce world (:body (rand-nth (vals @population))) (dance)))
 ; -60.dbamp = 0.001 = 1 sone
 ; -40.dbamp = 0.01 = 4 sone
@@ -221,11 +242,15 @@
 ; 0.dbamp= 1 = 64 sone
   (when-let [newmunchs (seq @munchtoadd)]
     (doseq [[x vol] newmunchs]
-      (new-munch x (inc (round vol))))
+      (when (< (count @munchies) (config :munchlimit))
+        (new-munch (* (width) x) (min (inc (round (/ vol (config :factor)))) (config :maxinjection)))))
     (reset! munchtoadd nil))
+  (when @sweeppos
+    (new-munch @sweeppos (config :sweepinject))
+    (swap! sweeppos #(if (or (< % 0) (> % (width))) nil (+ % (config :sweepstep)))))
   ; add stochastic baseline munchies!
-  (when (< (rand) (config :spawn))
-    (new-munch (rand-int (.width (current-applet))) 1))
+;  (when (< (rand) (config :spawn))
+;    (new-munch (rand-int (.width (current-applet))) 1))
   (doseq [[weirdo start] @incubating]
     (when (= start (mod @framesrendered (config :incubation)))
       (swap! incubating dissoc weirdo)
@@ -233,7 +258,8 @@
       (clone weirdo))))
 
 (defn clone-all []
-  (dorun (map clone (vals @population))))
+  (dorun (reduce #(when %1 (clone %2)) true (vals @population))))
+;  (dorun (map clone (vals @population))))
 
 (defn screenshot []
   (let [pdfscale 16
@@ -249,19 +275,24 @@
   ;(ImageIO/getWriterFormatNames)
 ;  (ImageIO/write (.createScreenCapture (Robot.) (Rectangle. (.getScreenSize (Toolkit/getDefaultToolkit)))) "png" (as-file (str (System/currentTimeMillis) ".png"))))
 
-(def step 200)
 (defn keypress []
   (case (raw-key)
-    (\1) (new-munch step 10)
-    (\2) (new-munch (* 2 step) 10)
-    (\3) (new-munch (* 3 step) 10)
-    (\4) (new-munch (* 4 step) 10)
-    (\5) (new-munch (* 5 step) 10)
+    (\1) (new-munch 0 10)
+    (\2) (new-munch (* 1/6 (width)) 10)
+    (\3) (new-munch (* 1/3 (width)) 10)
+    (\4) (new-munch (* 1/2 (width)) 10)
+    (\5) (new-munch (* 2/3 (width)) 10)
+    (\6) (new-munch (* 5/6 (width)) 10)
+    (\7) (new-munch (width) 10)
+    (\8) (new-munch (* 1/3 (width)) 0.5 10)
+    (\9) (new-munch (* 1/2 (width)) 0.5 10)
+    (\0) (new-munch (* 2/3 (width)) 0.5 10)
     (\A \a) (screenshot)
     (\C \c) (println (count @population) "+" (count @incubating) "vs." (count @munchies))
     (\D \d) (clone-all)
     (\F \f) (println (current-frame-rate))
-    (\R \r) (reset false)
+    (\M \m) (reset! sweeppos (* (width) (config :sweepstart)))
+    (\R \r) (do (load-config) (reset false))
     (\S \s) (new-munch (rand (width)))
     (\W \w) (println "Recording:" (:record (swap! aconfig #(update-in % [:record] not))))
     \+ (frame-rate (inc (current-frame-rate)))
@@ -271,7 +302,7 @@
 (defn -main
   "Let's get gooing."
   [& args]
-  (load-config "config.cfg")
+  (load-config)
   (sketch
     :title "sonic gray goo"
     :renderer :opengl ; switch to :java2d for pdf screenshots
@@ -279,6 +310,6 @@
     :draw draw
     :key-typed keypress
     :on-close shutdown
-    :display (config :display)
+    :display (or (config :display) (dec (count (.getScreenDevices (GraphicsEnvironment/getLocalGraphicsEnvironment)))))
     :size (config :size)
     :features (if (= :fullscreen (config :size)) [:present] [])))
