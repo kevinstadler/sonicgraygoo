@@ -305,7 +305,7 @@
   (load-config)
   (sketch
     :title "sonic gray goo"
-    :renderer :opengl ; switch to :java2d for pdf screenshots
+    :renderer (config :renderer) ; switch to :java2d for pdf screenshots
     :setup setup
     :draw draw
     :key-typed keypress

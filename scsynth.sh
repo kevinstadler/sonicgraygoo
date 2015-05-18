@@ -3,7 +3,7 @@ pidof jackd > /dev/null
 if [ $? -ne 0 ]; then
   case `arch` in
     "x86_64") jackd -r -d alsa -r 44100 & ;; #-C hw:1 & ;;
-    "armv7l") jackd -R -d alsa -r 44100 -s -C hw:1 & ;; # -t2000
+    "armv7l") jackd -R -d alsa -r 44100 -s -P hw:0 -C hw:1 & ;; # -t2000
     *) echo "Error: unknown architecture, don't know how to start jackd" && exit 1 ;;
   #jackd -r -d alsa -r 44100 &
   esac
