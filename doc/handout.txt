@@ -3,4 +3,4 @@
 the term was popularised by molecular nanotechnology pioneer Eric Drexler, who illustrated both exponential growth and its inherent limits by describing nanomachines that can replicate only if given special raw materials. the term "gray goo" was not intended to indicate colour or texture, but to highlight the difference between "superiority" in terms of human values and "superiority" in terms of competitive success: 'Though masses of uncontrolled replicators need not be gray or gooey, the term "gray goo" emphasizes that replicators able to obliterate life might be less inspiring than a single species of crabgrass. They might be "superior" in an evolutionary sense, but this need not make them valuable.'
 
 
-\small{(based on Wikipedia, the free encyclopedia)}
+\footnotesize{(based on Wikipedia, the free encyclopedia)}
